@@ -79,12 +79,14 @@ export default function App() {
     setBusy(false)
   }
 
+  const recheckSeq = useRef(0)
   async function recheck() {
     const id = caseId
     if (!id) return
+    const mine = ++recheckSeq.current
     try {
       const [r, c] = await Promise.all([api.check(id), api.getCase(id)])
-      if (current.current !== id) return          // a new check started meanwhile
+      if (current.current !== id || mine !== recheckSeq.current) return   // a newer check started meanwhile
       setResult(r); setItems(c.items)
     } catch { if (current.current === id) setError(t('err.generic')) }
   }

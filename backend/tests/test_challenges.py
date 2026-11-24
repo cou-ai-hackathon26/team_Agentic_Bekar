@@ -164,3 +164,29 @@ def test_an_upload_is_known_as_reading_while_it_is_read_and_failed_if_reading_fa
     monkeypatch.setattr(perceive, "read_image", broken)
     client.post(f"/api/cases/{cid}/images", files={"file": ("b.jpg", jpg(), "image/jpeg")}, data={"upload_id": "u-bad"})
     assert client.get(f"/api/cases/{cid}").json()["uploads"]["u-bad"]["state"] == "failed"
+
+
+def test_two_photos_of_one_prescription_sent_together_count_once(monkeypatch):
+    # Both were read before either was saved, so the 'same prescription again?' check saw no earlier copy and both
+    # counted: the rules then saw two doctors prescribing the same medicines (a false duplicate).
+    import threading
+    import app.ai.perceive as perceive
+    from app.conversation import Engine
+    from tests.test_api import fake_read
+    from tests.test_robustness import jpg
+    both_read = threading.Barrier(2, timeout=10)
+    read = fake_read([("Seclo", "20 mg", "1+0+1"), ("Napa", "500 mg", "1+1+1")], kind="prescription", doctor="Dr Z", date="1/11/26")
+
+    def together(data):
+        out = read(data)
+        both_read.wait()
+        return out
+    monkeypatch.setattr(perceive, "read_image", together)
+    e = Engine()
+    case = e.new_case()
+    outs = []
+    ts = [threading.Thread(target=lambda: outs.append(e.add_image(case, jpg()))) for _ in range(2)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(o["duplicate_of"] is not None for o in outs) == [False, True]
+    assert len(case.items) == 2 and len(case.docs) == 1

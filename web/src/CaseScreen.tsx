@@ -64,11 +64,19 @@ export function CaseScreen({ caseId, items, setItems, onCheck, checking, stats, 
   const fail = (msg: string) => { if (alive.current) setError(msg) }
 
   // Remove with undo: the line disappears at once; the server forgets it after 5 s unless the person taps undo.
+  // A delete lost on a flaky connection is sent again (and once more before checking): the server must not keep it.
+  const deleted = useRef(new Set<string>())
+  const sendDelete = useCallback(async (id: string) => {
+    for (let k = 0; k < 3; k++) {
+      try { await api.remove(caseId, id); deleted.current.add(id); return }
+      catch (e) { if (e instanceof ApiError) { deleted.current.add(id); return } await new Promise((r) => setTimeout(r, 700)) }   // 404: already gone
+    }
+  }, [caseId])
   const flushRemove = useCallback(async (p: Pending) => {
     if (!p) return
     window.clearTimeout(p.timer)
-    try { await api.remove(caseId, p.item.item_id) } catch { /* already gone */ }
-  }, [caseId])
+    await sendDelete(p.item.item_id)
+  }, [sendDelete])
   function remove(it: ItemView) {
     if (pending) flushRemove(pending)
     const index = items.findIndex((x) => x.item_id === it.item_id)
@@ -88,6 +96,7 @@ export function CaseScreen({ caseId, items, setItems, onCheck, checking, stats, 
   async function check() {
     const p = pending
     if (p) { setPending(null); await flushRemove(p) }
+    await Promise.all([...gone.current].filter((id) => !deleted.current.has(id)).map(sendDelete))
     onCheck()
   }
 

@@ -375,3 +375,24 @@ test('deleting cards one after another removes each at once', async ({ page }) =
   await page.waitForTimeout(6000)
   await expect(page.getByRole('article')).toHaveCount(1)
 })
+
+// A delete lost on a flaky connection was ignored: the server kept the medicine and the check still warned about it.
+test('a deleted medicine is not in the check even if the first delete request was lost', async ({ page }) => {
+  let deletes = 0
+  await page.route(/\/api\/cases\/[^/]+\/items\/[^/]+$/, async (route) => {
+    if (route.request().method() !== 'DELETE') return route.continue()
+    deletes += 1
+    if (deletes === 1) return route.abort('connectionreset')
+    return route.continue()
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'ওষুধের ব্যাগ পরীক্ষা করুন' }).click()
+  await page.getByRole('button', { name: /লিখে দিন/ }).first().click()
+  await page.locator('#typed').fill('Napa 500\nSeclo 20')
+  await page.getByRole('button', { name: /যোগ করুন/ }).click()
+  await expect(page.getByRole('article')).toHaveCount(2, { timeout: 15000 })
+  await page.getByRole('button', { name: 'বাদ দিন: Napa' }).click()
+  await page.getByRole('button', { name: /মিলিয়ে দেখুন/ }).click()
+  await expect(page.getByText('Seclo').first()).toBeVisible({ timeout: 20000 })
+  await expect(page.getByText('Napa')).toHaveCount(0)
+})

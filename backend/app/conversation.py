@@ -390,8 +390,12 @@ class Engine:
         if source == "strip":
             new = self._drop_ingredient_lines(self._one_per_product(new))
         # only now, when every line was read and matched, does the photo become part of the case (all or nothing)
-        self._commit(case, new, steps, doc={"doc_id": doc_id, "kind": read["kind"], "doctor": read.get("doctor_text") or doc_id,
-                                            "date": read.get("date_text") or "", "sig": sig})
+        # checked again while saving: two photos of one prescription read at the same time both passed the check above
+        same = None if allow_repeat else (lambda d: bool(sig and d.get("sig") and self._same_prescription(sig, d["sig"])))
+        seen = self._commit(case, new, steps, doc={"doc_id": doc_id, "kind": read["kind"], "doctor": read.get("doctor_text") or doc_id,
+                                                   "date": read.get("date_text") or "", "sig": sig}, same=same)
+        if seen:
+            return {"doc_id": None, "duplicate_of": seen["doc_id"], "kind": read["kind"], "items": []}
         return {"doc_id": doc_id, "duplicate_of": None, "kind": read["kind"], "items": [self.item_view(i) for i in new]}
 
     @staticmethod
@@ -427,13 +431,20 @@ class Engine:
         return [ci for ci in items if not ingredient_line(ci)]
 
     @staticmethod
-    def _commit(case: Case, new: list, steps: list, doc: dict | None = None) -> None:
+    def _commit(case: Case, new: list, steps: list, doc: dict | None = None, same=None) -> dict | None:
+        """Save under the case lock. With `same`, a document already saved that matches it wins: nothing is saved and
+        that document is returned."""
         with case.lock:
+            if doc and same:
+                seen = next((d for d in case.docs if same(d)), None)
+                if seen:
+                    return seen
             if doc:
                 case.docs.append(doc)
             case.items.extend(new)
             for name, t0, info in steps:
                 case.step(name, t0, **info)
+        return None
 
     def add_text(self, case: Case, text: str) -> dict:
         """Typed or spoken lines, e.g. 'Napa 500 1+0+1'. Works offline: no model call at all."""

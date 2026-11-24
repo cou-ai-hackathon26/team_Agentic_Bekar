@@ -375,7 +375,8 @@ def get_case(case_id: str):
     """Reopen a case by link (?case=...): its items, so the web app can show confirm or results."""
     t0 = time.time()
     case = _case(case_id)
-    return live({"case_id": case.case_id, "items": [engine().item_view(i) for i in case.items], "uploads": engine().uploads_view(case)}, t0)
+    uploads = engine().uploads_view(case)   # first: an upload seen as done always has its items in the list below
+    return live({"case_id": case.case_id, "items": [engine().item_view(i) for i in case.items], "uploads": uploads}, t0)
 
 
 # The same server also serves the built web app (web/dist): one command runs the whole product locally.
